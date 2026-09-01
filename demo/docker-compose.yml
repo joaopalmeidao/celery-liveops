@@ -34,6 +34,11 @@ services:
     environment:
       LIVEOPS_REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: amqp://guest:guest@rabbitmq:5672//
+      # Tightened for the demo so stopping the worker shows up in well under a
+      # minute. The defaults (90s / 20s) are the right ones in production: a TTL
+      # that generous survives a network hiccup without burying a healthy run.
+      LIVEOPS_PRESENCE_TTL: "45"
+      LIVEOPS_PRESENCE_REFRESH: "15"
       # The API process never kills anything: the watchdog belongs to workers.
       LIVEOPS_WATCHDOG_ENABLED: "false"
     depends_on:
@@ -52,6 +57,11 @@ services:
     environment:
       LIVEOPS_REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: amqp://guest:guest@rabbitmq:5672//
+      # Tightened for the demo so stopping the worker shows up in well under a
+      # minute. The defaults (90s / 20s) are the right ones in production: a TTL
+      # that generous survives a network hiccup without burying a healthy run.
+      LIVEOPS_PRESENCE_TTL: "45"
+      LIVEOPS_PRESENCE_REFRESH: "15"
       LIVEOPS_WATCHDOG_ENABLED: "true"
       CELERY_QUEUES: demo
     depends_on:

@@ -1,0 +1,73 @@
+# Runs the demo stack for real and photographs it.
+#
+# This is a test as much as a screenshot job: it builds the compose stack, starts
+# actual work, stops the worker container mid-run and asserts the panel notices.
+# If presence, the live log buffer or the lock catalogue break, this fails --
+# which is more than the unit suite can claim, since it runs against fakeredis.
+#
+# Screenshots are always uploaded as a build artifact, and committed back to
+# docs/screenshots (which is what the README shows) on main. The paths filter is
+# what keeps that honest: the log timestamps baked into each image differ on
+# every run, so without it every unrelated push would produce a commit.
+name: Demo
+
+on:
+  push:
+    branches: [main]
+    paths: ["demo/**", "src/**", ".github/workflows/demo.yml"]
+  pull_request:
+    paths: ["demo/**", "src/**", ".github/workflows/demo.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: demo-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install the capture tooling
+        run: |
+          pip install playwright httpx
+          playwright install --with-deps chromium
+
+      - name: Start the stack
+        run: docker compose -f demo/docker-compose.yml up -d --build
+
+      - name: Drive it and capture
+        run: python demo/capture.py --out-dir docs/screenshots
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: demo-screenshots
+          path: docs/screenshots/*.png
+
+      - name: Commit the screenshots
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/screenshots
+          git diff --staged --quiet && echo "nothing changed" && exit 0
+          git commit -m "Atualiza os prints do demo [skip ci]"
+          git push
+
+      - name: Container logs
+        if: failure()
+        run: docker compose -f demo/docker-compose.yml logs --tail=200
+
+      - name: Tear down
+        if: always()
+        run: docker compose -f demo/docker-compose.yml down -v

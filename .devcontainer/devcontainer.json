@@ -1,0 +1,28 @@
+{
+  "name": "celery-liveops",
+  "image": "mcr.microsoft.com/devcontainers/python:3.12",
+
+  // The demo is a compose stack, so the container needs its own Docker.
+  "features": {
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {}
+  },
+
+  "forwardPorts": [8000, 15672],
+  "portsAttributes": {
+    "8000": { "label": "Demo panel", "onAutoForward": "openPreview" },
+    "15672": { "label": "RabbitMQ management" }
+  },
+
+  // Dev dependencies for the test suite; the demo itself runs in compose.
+  "postCreateCommand": "pip install -e '.[dev]'",
+
+  // Building the four images takes a couple of minutes on a cold Codespace;
+  // starting it here means the panel is ready by the time the editor is.
+  "postAttachCommand": "docker compose -f demo/docker-compose.yml up -d --build",
+
+  "customizations": {
+    "vscode": {
+      "extensions": ["ms-python.python", "charliermarsh.ruff"]
+    }
+  }
+}

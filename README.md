@@ -1,5 +1,10 @@
 # celery-liveops
 
+[![CI](https://github.com/joaopalmeidao/celery-liveops/actions/workflows/ci.yml/badge.svg)](https://github.com/joaopalmeidao/celery-liveops/actions/workflows/ci.yml)
+[![Demo](https://github.com/joaopalmeidao/celery-liveops/actions/workflows/demo.yml/badge.svg)](https://github.com/joaopalmeidao/celery-liveops/actions/workflows/demo.yml)
+[![Python](https://img.shields.io/pypi/pyversions/celery-liveops)](https://pypi.org/project/celery-liveops/)
+[![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+
 **See inside a long-running Celery task while it runs.**
 
 A task that takes eight hours is a black box. The result backend tells you what
@@ -205,15 +210,38 @@ mounted** without either `dependencies=[...]` or an explicit `public=True`.
 ## Try it
 
 A working stack — Redis, RabbitMQ, a worker, a FastAPI panel — is in
-[`demo/`](demo/):
+[`demo/`](demo/). In the browser, no install:
+
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/joaopalmeidao/celery-liveops)
+
+Or locally:
 
 ```bash
-cd demo && docker compose up --build
+docker compose -f demo/docker-compose.yml up --build
 # open http://localhost:8000
 ```
 
 Start a task, watch its terminal stream, kill the worker mid-run and watch the
 row go from *alive* to *no signal* while the orphan log survives.
+
+### These screenshots are generated, not staged
+
+The [Demo workflow](.github/workflows/demo.yml) builds the stack on every change,
+starts real work, **stops the worker container mid-run** and captures the panel.
+So it is a test as much as a picture: if presence, the live buffer or the lock
+catalogue break, it fails — which the unit suite cannot claim, running as it does
+against `fakeredis`.
+
+| A task streaming | Its worker stopped | The lock it left behind |
+|---|---|---|
+| ![live](docs/screenshots/01-live.png) | ![no signal](docs/screenshots/02-no-signal.png) | ![orphan lock](docs/screenshots/03-orphan-lock.png) |
+
+Reproduce it yourself against a running stack:
+
+```bash
+pip install playwright httpx && playwright install chromium
+python demo/capture.py --out-dir docs/screenshots
+```
 
 ---
 

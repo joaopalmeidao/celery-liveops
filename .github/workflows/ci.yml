@@ -1,9 +1,10 @@
 name: CI
 
 on:
+  # Every commit on every branch: a push is exactly when you want to know.
   push:
-    branches: [main]
   pull_request:
+  workflow_dispatch:
 
 jobs:
   test:
