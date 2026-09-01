@@ -1,0 +1,65 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "celery-liveops"
+version = "0.1.0"
+description = "See inside a long-running Celery task while it runs: live logs, presence, per-task deadlines, orphan locks."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "Joao Pedro" }]
+keywords = ["celery", "redis", "observability", "worker", "watchdog", "logs", "selenium"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: System :: Monitoring",
+    "Topic :: System :: Distributed Computing",
+    "Typing :: Typed",
+]
+dependencies = [
+    "redis>=4.2",
+]
+
+[project.optional-dependencies]
+celery = ["celery>=5.2"]
+fastapi = ["fastapi>=0.100"]
+dev = [
+    "celery>=5.2",
+    "fastapi>=0.100",
+    "fakeredis>=2.20",
+    "httpx>=0.27",
+    "pytest>=7.4",
+    "pytest-cov>=4.1",
+    "ruff>=0.6",
+]
+
+[project.urls]
+Homepage = "https://github.com/jpedro-dev/celery-liveops"
+Issues = "https://github.com/jpedro-dev/celery-liveops/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/celery_liveops"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+# We support Python 3.9, and `ContextExtractor = Callable[[Optional[str], ...]]`
+# is a runtime alias: rewriting it to `str | None` would fail to evaluate there.
+ignore = ["B008", "UP006", "UP035", "UP045"]
