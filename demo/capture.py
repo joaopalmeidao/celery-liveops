@@ -29,6 +29,11 @@ from playwright.sync_api import sync_playwright
 
 VIEWPORT = {"width": 1440, "height": 960}
 
+# NOT "networkidle": the panel polls every two seconds, so the network is never
+# idle and the wait always times out. What actually means "ready" here is that
+# the first poll painted something -- so we wait on a selector instead.
+READY = "domcontentloaded"
+
 
 def compose(args: list[str], compose_file: str) -> None:
     subprocess.run(
@@ -121,7 +126,7 @@ def main() -> int:
         slow = start(args.base, "slow", steps=180)
         wait_until(lambda: has_lines(args.base, slow, 6), 90, "the terminal to fill")
 
-        page.goto(args.base, wait_until="networkidle")
+        page.goto(args.base, wait_until=READY)
         page.wait_for_selector(".run", timeout=30_000)
         select_run(page, slow)
         page.screenshot(path=out / "01-live.png")
@@ -131,7 +136,7 @@ def main() -> int:
         # Not a styled badge: the worker container is actually stopped.
         compose(["stop", "worker"], args.compose_file)
         wait_until(lambda: not is_alive(args.base, slow), 180, "presence to expire")
-        page.reload(wait_until="networkidle")
+        page.reload(wait_until=READY)
         page.wait_for_selector(".run", timeout=30_000)
         select_run(page, slow)
         page.screenshot(path=out / "02-no-signal.png")
@@ -143,7 +148,7 @@ def main() -> int:
         # ── 3. the lock a dead process left behind ───────────────────────────
         start(args.base, "locked")
         wait_until(lambda: has_lock(args.base), 120, "the orphan lock to appear")
-        page.reload(wait_until="networkidle")
+        page.reload(wait_until=READY)
         page.wait_for_selector(".lock", timeout=30_000)
         page.screenshot(path=out / "03-orphan-lock.png")
         print("captured 03-orphan-lock.png")
