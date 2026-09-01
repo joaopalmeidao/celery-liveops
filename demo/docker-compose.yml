@@ -1,0 +1,59 @@
+# A whole stack you can break on purpose: docker compose up --build
+#
+# Then open http://localhost:8000 and try, in this order:
+#   1. "Healthy long task"  -- watch the terminal stream from another process.
+#   2. "Task that hangs"    -- 20s later the watchdog kills it. The row goes to
+#                              "no signal", and the log of the dead attempt is
+#                              still there, because it was archived, not deleted.
+#   3. "Dies holding a lock" -- the lock stays behind, named, with its TTL, and
+#                              a button to release it.
+#   4. docker compose stop worker -- every running row loses its signal at once.
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      retries: 20
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    ports: ["5672:5672", "15672:15672"]
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      retries: 20
+
+  api:
+    build:
+      context: ..
+      dockerfile: demo/Dockerfile
+    ports: ["8000:8000"]
+    environment:
+      LIVEOPS_REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: amqp://guest:guest@rabbitmq:5672//
+      # The API process never kills anything: the watchdog belongs to workers.
+      LIVEOPS_WATCHDOG_ENABLED: "false"
+    depends_on:
+      redis: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+
+  worker:
+    build:
+      context: ..
+      dockerfile: demo/Dockerfile
+    # prefork, so the watchdog's kill takes out one child and the worker keeps
+    # serving. With --pool=solo (the browser-worker case) it takes the container
+    # down instead, and restart: unless-stopped brings it back clean.
+    command: celery -A demo.app.tasks:app worker -Q demo --pool=prefork --concurrency=2 -l info
+    restart: unless-stopped
+    environment:
+      LIVEOPS_REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: amqp://guest:guest@rabbitmq:5672//
+      LIVEOPS_WATCHDOG_ENABLED: "true"
+      CELERY_QUEUES: demo
+    depends_on:
+      redis: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }

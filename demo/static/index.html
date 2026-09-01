@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>celery-liveops demo</title>
+<style>
+  :root {
+    --bg: #0d1117; --panel: #151b23; --line: #232c38; --ink: #e6edf3;
+    --dim: #8b98a5; --accent: #4ade80; --warn: #fbbf24; --bad: #f87171;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  header {
+    padding: 18px 24px; border-bottom: 1px solid var(--line);
+    display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap;
+  }
+  h1 { font-size: 16px; margin: 0; letter-spacing: -.01em; }
+  h1 span { color: var(--dim); font-weight: 400; }
+  .tag {
+    font: 11px/1 var(--mono); padding: 5px 8px; border-radius: 999px;
+    border: 1px solid var(--line); color: var(--dim);
+  }
+  main { display: grid; grid-template-columns: 380px 1fr; gap: 1px; background: var(--line); }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  section { background: var(--bg); padding: 20px 24px; min-width: 0; }
+  h2 {
+    font-size: 11px; text-transform: uppercase; letter-spacing: .09em;
+    color: var(--dim); margin: 0 0 12px; font-weight: 600;
+  }
+  h2 + h2 { margin-top: 26px; }
+  button {
+    font: inherit; font-size: 13px; padding: 7px 12px; cursor: pointer;
+    background: var(--panel); color: var(--ink);
+    border: 1px solid var(--line); border-radius: 7px;
+  }
+  button:hover { border-color: #3a4757; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .card {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 9px; padding: 11px 13px; margin-bottom: 8px;
+  }
+  .run { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+  .run.sel { border-color: #3f5a7a; background: #16202c; }
+  .run code { font: 12px var(--mono); color: var(--dim); }
+  .name { font-weight: 600; font-size: 13px; }
+  .pill {
+    margin-left: auto; font: 10px/1 var(--mono); padding: 5px 8px;
+    border-radius: 999px; white-space: nowrap;
+  }
+  .alive { background: rgba(74,222,128,.13); color: var(--accent); }
+  .dead  { background: rgba(248,113,113,.13); color: var(--bad); }
+  pre#terminal {
+    background: #0a0e14; border: 1px solid var(--line); border-radius: 9px;
+    padding: 14px 16px; margin: 0; height: 44vh; overflow: auto;
+    font: 12px/1.65 var(--mono); color: #cbd5e1; white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .meta { color: var(--dim); font-size: 12px; }
+  .kv { display: flex; gap: 10px; font: 12px var(--mono); color: var(--dim); }
+  .kv b { color: var(--ink); font-weight: 600; }
+  .lock { border-left: 3px solid var(--warn); }
+  .lock .blocks { color: var(--dim); font-size: 12px; margin-top: 5px; }
+  .orphan { border-left: 3px solid var(--bad); }
+  .empty { color: var(--dim); font-size: 13px; padding: 4px 0; }
+  #shot { width: 96px; height: 96px; border-radius: 7px; border: 1px solid var(--line); }
+  .split { display: flex; gap: 16px; align-items: flex-start; margin-top: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>celery-liveops <span>&mdash; what the task is doing, while it does it</span></h1>
+  <span class="tag" id="stat-workers">workers ...</span>
+  <span class="tag" id="stat-queue">queue ...</span>
+</header>
+
+<main>
+  <section>
+    <h2>Start something</h2>
+    <div class="row">
+      <button onclick="start('slow')">Healthy long task</button>
+      <button onclick="start('stuck')">Task that hangs</button>
+      <button onclick="start('locked')">Dies holding a lock</button>
+    </div>
+
+    <h2>Runs</h2>
+    <div id="runs"><div class="empty">Nothing yet.</div></div>
+
+    <h2>Locks held</h2>
+    <div id="locks"><div class="empty">None.</div></div>
+
+    <h2>Queues</h2>
+    <div id="queues"></div>
+  </section>
+
+  <section>
+    <h2>Terminal <span class="meta" id="term-meta"></span></h2>
+    <pre id="terminal">Pick a run on the left.</pre>
+    <div class="split">
+      <div>
+        <h2 style="margin-top:0">Last frame</h2>
+        <img id="shot" alt="no snapshot" style="display:none">
+        <div class="empty" id="no-shot">No snapshot.</div>
+      </div>
+      <div style="flex:1">
+        <h2 style="margin-top:0">Workers</h2>
+        <div id="workers"></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+let selected = null;
+
+const j = (url, opts) => fetch(url, opts).then(r => r.json());
+
+async function start(kind) {
+  const { task_id } = await j(`/demo/start/${kind}`, { method: 'POST' });
+  selected = task_id;
+  refresh();
+}
+
+async function release(key) {
+  await j('/liveops/locks/release', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ keys: [key] }),
+  });
+  refresh();
+}
+
+function runRow(r) {
+  const el = document.createElement('div');
+  el.className = 'card run' + (r.task_id === selected ? ' sel' : '');
+  el.onclick = () => { selected = r.task_id; refresh(); };
+  el.innerHTML = `
+    <div>
+      <div class="name">${r.name}</div>
+      <code>${r.task_id.slice(0, 8)}</code>
+    </div>
+    <span class="pill ${r.alive ? 'alive' : 'dead'}">
+      ${r.alive ? 'alive' : 'no signal'}
+    </span>`;
+  return el;
+}
+
+async function refresh() {
+  const [{ runs }, over] = await Promise.all([j('/demo/runs'), j('/demo/overview')]);
+
+  document.getElementById('stat-workers').textContent =
+    `${over.workers.length} worker${over.workers.length === 1 ? '' : 's'}`;
+  document.getElementById('stat-queue').textContent =
+    `queue: ${over.queue_depth === null ? 'unknown' : over.queue_depth + ' waiting'}`;
+
+  const runsEl = document.getElementById('runs');
+  runsEl.innerHTML = '';
+  if (!runs.length) runsEl.innerHTML = '<div class="empty">Nothing yet.</div>';
+  runs.forEach(r => runsEl.appendChild(runRow(r)));
+
+  const wEl = document.getElementById('workers');
+  wEl.innerHTML = over.workers.length ? '' : '<div class="empty">No heartbeat.</div>';
+  over.workers.forEach(w => {
+    const d = document.createElement('div');
+    d.className = 'card';
+    d.innerHTML = `<div class="kv"><b>${w.worker_id}</b></div>
+      <div class="meta">${w.status}${w.current_task ? ' &middot; ' + w.current_task.task_name : ''}</div>`;
+    wEl.appendChild(d);
+  });
+
+  const { locks } = await j('/liveops/locks');
+  const lEl = document.getElementById('locks');
+  lEl.innerHTML = locks.length ? '' : '<div class="empty">None.</div>';
+  locks.forEach(l => {
+    const d = document.createElement('div');
+    d.className = 'card lock';
+    d.innerHTML = `<div class="kv"><b>${l.key}</b>
+        <span>${l.ttl === null ? 'never expires' : l.ttl + 's left'}</span></div>
+      <div class="blocks">${l.blocks}</div>`;
+    const b = document.createElement('button');
+    b.textContent = 'Release';
+    b.style.marginTop = '9px';
+    b.onclick = () => release(l.key);
+    d.appendChild(b);
+    lEl.appendChild(d);
+  });
+
+  const qEl = document.getElementById('queues');
+  qEl.innerHTML = '';
+  Object.entries(over.consumers).forEach(([q, nodes]) => {
+    const d = document.createElement('div');
+    d.className = 'card';
+    d.innerHTML = `<div class="kv"><b>${q}</b><span>${nodes.length} consumer(s)</span></div>`;
+    qEl.appendChild(d);
+  });
+  over.orphan_queues.forEach(q => {
+    const d = document.createElement('div');
+    d.className = 'card orphan';
+    d.innerHTML = `<div class="kv"><b>${q}</b><span>nobody consuming</span></div>
+      <div class="blocks meta">Messages are accepted and never run.</div>`;
+    qEl.appendChild(d);
+  });
+
+  if (selected) {
+    const body = await j(`/liveops/runs/${selected}/logs`);
+    const term = document.getElementById('terminal');
+    const stuck = term.scrollTop + term.clientHeight >= term.scrollHeight - 40;
+    term.textContent = body.logs || '(no output yet)';
+    if (stuck) term.scrollTop = term.scrollHeight;
+    document.getElementById('term-meta').textContent =
+      `${selected.slice(0, 8)} · ${body.alive ? 'live' : 'archived'}`;
+
+    const shot = await fetch(`/liveops/runs/${selected}/snapshot`);
+    const img = document.getElementById('shot');
+    const none = document.getElementById('no-shot');
+    if (shot.ok) {
+      img.src = 'data:image/png;base64,' + (await shot.json()).image_base64;
+      img.style.display = 'block'; none.style.display = 'none';
+    } else {
+      img.style.display = 'none'; none.style.display = 'block';
+    }
+  }
+}
+
+refresh();
+setInterval(refresh, 2000);
+</script>
+</body>
+</html>
