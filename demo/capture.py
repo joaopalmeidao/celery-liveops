@@ -98,11 +98,15 @@ def has_lock(base: str) -> bool:
     return bool(httpx.get(f"{base}/liveops/locks", timeout=10).json()["locks"])
 
 
-def select_run(page, task_id: str) -> None:
-    """Click the card for this run (the panel keys cards on the short id)."""
-    card = page.locator(".run", has=page.locator(f"code:text('{task_id[:8]}')"))
-    card.first.click()
-    page.wait_for_timeout(2500)   # let one poll cycle land
+def open_run(page, base: str, task_id: str) -> None:
+    """Open the panel with this run selected.
+
+    Deep link rather than a click: the card list is redrawn by a poll every two
+    seconds, so clicking races the redraw and lands on a detached element.
+    """
+    page.goto(f"{base}/?run={task_id}", wait_until=READY)
+    page.wait_for_selector(".run.sel", timeout=30_000)
+    page.wait_for_timeout(2500)   # let one poll cycle paint the terminal
 
 
 def main() -> int:
@@ -126,9 +130,7 @@ def main() -> int:
         slow = start(args.base, "slow", steps=180)
         wait_until(lambda: has_lines(args.base, slow, 6), 90, "the terminal to fill")
 
-        page.goto(args.base, wait_until=READY)
-        page.wait_for_selector(".run", timeout=30_000)
-        select_run(page, slow)
+        open_run(page, args.base, slow)
         page.screenshot(path=out / "01-live.png")
         print(f"captured 01-live.png (run {slow[:8]})")
 
@@ -136,9 +138,7 @@ def main() -> int:
         # Not a styled badge: the worker container is actually stopped.
         compose(["stop", "worker"], args.compose_file)
         wait_until(lambda: not is_alive(args.base, slow), 180, "presence to expire")
-        page.reload(wait_until=READY)
-        page.wait_for_selector(".run", timeout=30_000)
-        select_run(page, slow)
+        open_run(page, args.base, slow)
         page.screenshot(path=out / "02-no-signal.png")
         print("captured 02-no-signal.png")
 

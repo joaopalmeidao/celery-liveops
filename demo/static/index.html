@@ -25,7 +25,11 @@
     font: 11px/1 var(--mono); padding: 5px 8px; border-radius: 999px;
     border: 1px solid var(--line); color: var(--dim);
   }
-  main { display: grid; grid-template-columns: 380px 1fr; gap: 1px; background: var(--line); }
+  /* Fill the window: the two columns are the page, not a band across the top. */
+  main {
+    display: grid; grid-template-columns: 380px 1fr; gap: 1px;
+    background: var(--line); min-height: calc(100vh - 62px);
+  }
   @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
   section { background: var(--bg); padding: 20px 24px; min-width: 0; }
   h2 {
@@ -115,7 +119,10 @@
 </main>
 
 <script>
-let selected = null;
+// A run can be selected by URL (?run=<task id>), so a link to "what that job was
+// doing" survives a reload -- and so the screenshot job can land on a run
+// without racing the poll that redraws the cards.
+let selected = new URLSearchParams(location.search).get('run');
 
 const j = (url, opts) => fetch(url, opts).then(r => r.json());
 
@@ -137,7 +144,11 @@ async function release(key) {
 function runRow(r) {
   const el = document.createElement('div');
   el.className = 'card run' + (r.task_id === selected ? ' sel' : '');
-  el.onclick = () => { selected = r.task_id; refresh(); };
+  el.onclick = () => {
+    selected = r.task_id;
+    history.replaceState(null, '', `?run=${r.task_id}`);
+    refresh();
+  };
   el.innerHTML = `
     <div>
       <div class="name">${r.name}</div>
