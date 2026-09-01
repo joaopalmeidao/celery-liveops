@@ -10,7 +10,9 @@ PNG = b"\x89PNG\r\n\x1a\n-fake-bytes"
 
 @pytest.fixture(autouse=True)
 def reset_throttle():
-    snapshots._last_capture = 0.0
+    # float("-inf"), not 0.0: time.monotonic() is uptime on Linux, so zero is
+    # "a few seconds ago" on a freshly booted machine, not "long ago".
+    snapshots._last_capture = float("-inf")
     snapshots._in_flight.clear()
     snapshots.set_gate(None)
     snapshots._stats.update({"stored": 0, "failed": 0, "last_error": None})
@@ -59,6 +61,18 @@ def test_throttled_so_it_can_live_inside_a_hot_loop(redis):
         assert liveops.snapshot(driver) is False
 
     assert driver.calls == 1
+
+
+def test_the_first_capture_does_not_depend_on_machine_uptime(redis, monkeypatch):
+    """On Linux time.monotonic() is the host's uptime. A process starting on a
+    freshly booted machine used to lose its first frame to the throttle."""
+    snapshots._last_capture = float("-inf")
+    monkeypatch.setattr(snapshots.time, "monotonic", lambda: 0.4)   # just booted
+    liveops.configure(snapshot_min_interval=1.2)
+    driver = FakeDriver()
+
+    with liveops.capture_logs("run-boot"):
+        assert liveops.snapshot(driver) is True
 
 
 def test_a_gate_can_turn_it_off_without_a_redeploy(redis):

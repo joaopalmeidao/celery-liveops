@@ -10,11 +10,12 @@ Two questions a task table cannot answer on its own:
    And because Celery **keeps the task id across retries**, the next attempt
    would show up as a second card sharing the dead one's terminal.
 
-The answer comes from Celery's own ``task_prerun``/``task_postrun`` signals. On
-start the worker writes presence keys and spawns a daemon thread that refreshes
-them; on finish it deletes them. Readers only ever do ``EXISTS`` -- no
-``celery inspect``, which is slow and times out exactly when you need it, in an
-endpoint being polled every few seconds.
+The answer comes from Celery's own signals. ``worker_ready`` announces the
+process and starts one daemon thread that keeps its heartbeat warm for as long
+as it lives -- an idle worker still has to answer "are you up?" -- and
+``task_prerun``/``task_postrun`` add and remove the current run's own key.
+Readers only ever do ``EXISTS`` -- no ``celery inspect``, which is slow and times
+out exactly when you need it, in an endpoint being polled every few seconds.
 
 Every key carries a TTL, so a process dying is self-cleaning: nothing is left
 behind claiming to be alive.
@@ -38,10 +39,15 @@ logger = logging.getLogger(__name__)
 ContextExtractor = Callable[[Optional[str], tuple, dict], Dict[str, Any]]
 
 _installed = False
-_stop: Optional[threading.Event] = None
-_thread: Optional[threading.Thread] = None
 _lock = threading.Lock()
 _context_extractor: Optional[ContextExtractor] = None
+
+# One refresh thread per PROCESS, not per task. It keeps the worker's heartbeat
+# warm whether or not anything is running -- an idle worker still has to answer
+# "are you up?" -- and refreshes the current run's presence when there is one.
+_stop: Optional[threading.Event] = None
+_thread: Optional[threading.Thread] = None
+_current: dict = {"task_id": None, "context": {}}
 
 
 def worker_id() -> str:
@@ -192,25 +198,66 @@ def workers() -> List[dict]:
 # ── Celery wiring ────────────────────────────────────────────────────────────
 
 
-def _refresh_until_stopped(task_id: str, context: Dict[str, Any], stop: threading.Event) -> None:
-    """Keep presence warm while the task runs (daemon thread)."""
+def _refresh_forever(stop: threading.Event) -> None:
+    """Keep this process's presence warm (daemon thread).
+
+    Runs for the life of the worker, not the life of a task: a worker with
+    nothing to do still has to answer "are you up?", and a panel that only lists
+    busy workers reports zero the moment the queue drains.
+    """
     conf = settings()
     while not stop.wait(conf.presence_refresh):
         try:
-            mark_alive(task_id, context)
-            heartbeat("busy")
-            redis = client()
-            if redis is not None:
-                redis.expire(_worker_task_key(worker_id()), conf.worker_ttl)
+            task_id = _current["task_id"]
+            heartbeat("busy" if task_id else "idle")
+            if task_id:
+                mark_alive(task_id, _current["context"])
+                redis = client()
+                if redis is not None:
+                    redis.expire(_worker_task_key(worker_id()), conf.worker_ttl)
         except Exception:
-            # Redis being down must not take the task with it. Worst case the run
-            # shows as "no signal" and your reaper closes it.
+            # Redis being down must not take the worker with it. Worst case the
+            # run shows as "no signal" and your reaper closes it.
             pass
 
 
-def _start(task_id=None, task=None, args=None, kwargs=None, **_):
+def _ensure_refresher() -> None:
+    """Start the process's refresh thread once."""
     global _stop, _thread
 
+    with _lock:
+        if _thread is not None and _thread.is_alive():
+            return
+        _stop = threading.Event()
+        _thread = threading.Thread(
+            target=_refresh_forever, args=(_stop,), daemon=True, name="liveops-presence"
+        )
+        _thread.start()
+
+
+def _on_worker_ready(**_):
+    """Announce an idle worker the moment it is ready to consume."""
+    heartbeat("idle")
+    _ensure_refresher()
+
+
+def _on_worker_shutdown(**_):
+    """Stop claiming to be up. The TTL would do it, but not for another minute."""
+    global _stop, _thread
+
+    with _lock:
+        if _stop is not None:
+            _stop.set()
+        _stop = None
+        _thread = None
+
+    redis = client()
+    if redis is not None:
+        with guard("presence shutdown"):
+            redis.delete(_worker_key(worker_id()), _worker_task_key(worker_id()))
+
+
+def _start(task_id=None, task=None, args=None, kwargs=None, **_):
     task_name = getattr(task, "name", None)
     context: Dict[str, Any] = {"task_name": task_name, "started_at": _now()}
     if _context_extractor is not None:
@@ -219,41 +266,29 @@ def _start(task_id=None, task=None, args=None, kwargs=None, **_):
         except Exception as exc:
             logger.debug("celery-liveops: context extractor failed: %s", exc)
 
+    _current["task_id"] = task_id
+    _current["context"] = context
+
     redis = client()
     if redis is not None:
         with guard("presence start"):
             redis.set(
                 _worker_task_key(worker_id()),
                 json.dumps({"task_id": task_id, **context}),
-                # Short TTL (twice the refresh interval): if the process dies the
-                # key vanishes on its own instead of claiming the worker is busy
-                # for the next hour.
+                # Short TTL (a few times the refresh interval): if the process
+                # dies the key vanishes on its own instead of claiming the worker
+                # is busy for the next hour.
                 ex=settings().worker_ttl,
             )
     mark_alive(task_id, context)
     heartbeat("busy")
-
-    with _lock:
-        if _stop is not None:
-            _stop.set()
-        _stop = threading.Event()
-        _thread = threading.Thread(
-            target=_refresh_until_stopped,
-            args=(task_id, context, _stop),
-            daemon=True,
-            name="liveops-presence",
-        )
-        _thread.start()
+    # Also covers the eager/embedded case, where worker_ready never fires.
+    _ensure_refresher()
 
 
 def _finish(task_id=None, **_):
-    global _stop, _thread
-
-    with _lock:
-        if _stop is not None:
-            _stop.set()
-        _stop = None
-        _thread = None
+    _current["task_id"] = None
+    _current["context"] = {}
 
     clear_alive(task_id)
     redis = client()
@@ -286,12 +321,21 @@ def install_presence(context_extractor: Optional[ContextExtractor] = None) -> bo
     if _installed:
         return True
     try:
-        from celery.signals import task_postrun, task_prerun
+        from celery.signals import (
+            task_postrun,
+            task_prerun,
+            worker_ready,
+            worker_shutdown,
+        )
     except ImportError:
         logger.debug("celery-liveops: celery not installed, presence not wired")
         return False
 
     task_prerun.connect(_start, weak=False)
     task_postrun.connect(_finish, weak=False)
+    # Idle workers count: without these two, the panel lists a worker only while
+    # it happens to be busy, and reports zero as soon as the queue drains.
+    worker_ready.connect(_on_worker_ready, weak=False)
+    worker_shutdown.connect(_on_worker_shutdown, weak=False)
     _installed = True
     return True

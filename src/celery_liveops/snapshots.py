@@ -36,7 +36,11 @@ logger = logging.getLogger(__name__)
 
 _executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="liveops-shot")
 _in_flight = threading.Event()
-_last_capture = 0.0
+#: Negative infinity, NOT 0.0: `time.monotonic()` is the machine's uptime on
+#: Linux, so on a freshly booted host (a CI runner, a container that just came
+#: up) zero is not "long ago" -- it is a few seconds ago, and the first capture
+#: of the process gets swallowed by the throttle.
+_last_capture = float("-inf")
 _stats = {"stored": 0, "failed": 0, "last_error": None}
 
 #: Optional gate, e.g. a cached read of a feature flag. Fail-open by contract:

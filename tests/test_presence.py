@@ -61,6 +61,20 @@ def test_workers_survives_a_hostname_containing_colons(redis):
     assert [w["worker_id"] for w in found] == [wid]
 
 
+def test_an_idle_worker_is_still_listed(redis):
+    """A panel that lists only busy workers reports zero the moment the queue
+    drains -- and a demo waiting for a heartbeat waits forever."""
+    presence._on_worker_ready()
+
+    found = liveops.workers()
+    assert len(found) == 1
+    assert found[0]["status"] == "idle"
+    assert found[0]["current_task"] is None
+
+    presence._on_worker_shutdown()
+    assert liveops.workers() == [], "a worker shutting down stops claiming to be up"
+
+
 def test_task_signals_write_and_clear_presence(redis):
     class Task:
         name = "demo.task"

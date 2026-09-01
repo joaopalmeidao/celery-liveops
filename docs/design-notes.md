@@ -77,9 +77,15 @@ configuration in your API, your beat process and your workers.
 
 `inspect` broadcasts on the broker and waits for replies. It is slow, it times
 out under load, and the caller here is an endpoint being polled every few
-seconds by every open browser tab. So the worker *writes* presence
-(`task_prerun`, a daemon thread, `task_postrun`) and readers only ever do
-`EXISTS`.
+seconds by every open browser tab. So the worker *writes* presence and readers
+only ever do `EXISTS`.
+
+The refresh thread belongs to the **process**, not to a task. That distinction
+cost a broken CI run: with the thread scoped to a task, a worker only had a
+heartbeat while it happened to be busy, so the panel reported zero workers the
+moment the queue drained — and anything waiting for a worker to appear before
+queuing work waited forever. `worker_ready` announces the process, the thread
+keeps it warm, `worker_shutdown` withdraws it.
 
 ### Everything has a TTL
 
