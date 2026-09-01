@@ -39,6 +39,7 @@ services:
       # that generous survives a network hiccup without burying a healthy run.
       LIVEOPS_PRESENCE_TTL: "45"
       LIVEOPS_PRESENCE_REFRESH: "15"
+      LIVEOPS_WORKER_TTL: "45"
       # The API process never kills anything: the watchdog belongs to workers.
       LIVEOPS_WATCHDOG_ENABLED: "false"
     depends_on:
@@ -62,6 +63,7 @@ services:
       # that generous survives a network hiccup without burying a healthy run.
       LIVEOPS_PRESENCE_TTL: "45"
       LIVEOPS_PRESENCE_REFRESH: "15"
+      LIVEOPS_WORKER_TTL: "45"
       LIVEOPS_WATCHDOG_ENABLED: "true"
       CELERY_QUEUES: demo
     depends_on:

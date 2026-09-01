@@ -60,7 +60,7 @@ def wait_for_worker(base: str, timeout: float = 120) -> None:
     deadline = time.time() + timeout
     while time.time() < deadline:
         try:
-            if httpx.get(f"{base}/demo/overview", timeout=5).json()["workers"]:
+            if workers(base):
                 return
         except Exception:
             pass
@@ -92,6 +92,10 @@ def has_lines(base: str, task_id: str, minimum: int) -> bool:
 
 def is_alive(base: str, task_id: str) -> bool:
     return httpx.get(f"{base}/liveops/runs/{task_id}/logs", timeout=10).json()["alive"]
+
+
+def workers(base: str) -> list:
+    return httpx.get(f"{base}/demo/overview", timeout=10).json()["workers"]
 
 
 def has_lock(base: str) -> bool:
@@ -138,6 +142,9 @@ def main() -> int:
         # Not a styled badge: the worker container is actually stopped.
         compose(["stop", "worker"], args.compose_file)
         wait_until(lambda: not is_alive(args.base, slow), 180, "presence to expire")
+        # Wait for the worker's own key to lapse too, so the header does not
+        # still claim "1 worker, busy" next to a row that says "no signal".
+        wait_until(lambda: not workers(args.base), 120, "the worker key to lapse")
         open_run(page, args.base, slow)
         page.screenshot(path=out / "02-no-signal.png")
         print("captured 02-no-signal.png")

@@ -49,9 +49,17 @@ def runs():
     """Recent runs, annotated with whether anybody is still executing them."""
     redis = liveops.redis_client()
     rows = []
+    seen = set()
     raw = redis.lrange(RUNS_KEY, 0, -1) if redis is not None else []
     for item in raw:
         task_id, name, started = item.split("|")
+        # Deduplicate by task id, newest first. Celery keeps the task id across
+        # retries, so a run whose worker died and came back is the SAME run --
+        # listing it twice is the duplicate-card bug this library exists to
+        # avoid, reproduced in the demo's own bookkeeping.
+        if task_id in seen:
+            continue
+        seen.add(task_id)
         rows.append({"task_id": task_id, "name": name, "started": int(started)})
 
     alive = liveops.alive_among([r["task_id"] for r in rows])

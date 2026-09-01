@@ -53,6 +53,18 @@ def test_runs_are_annotated_with_presence(demo_client, redis):
     assert redis.llen(RUNS_KEY) == 2
 
 
+def test_a_retried_run_is_listed_once(demo_client, redis):
+    """Celery keeps the task id across retries: the same run coming back after
+    its worker died is one run, not two cards sharing a terminal."""
+    from demo.app.tasks import remember
+
+    remember("same-id", "slow_job")
+    remember("same-id", "slow_job")
+
+    rows = demo_client.get("/demo/runs").json()["runs"]
+    assert [r["task_id"] for r in rows] == ["same-id"]
+
+
 def test_the_run_list_is_capped(demo_client, redis):
     from demo.app.tasks import RUNS_KEY, remember
 
