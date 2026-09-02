@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/joaopalmeidao/celery-liveops/actions/workflows/ci.yml/badge.svg)](https://github.com/joaopalmeidao/celery-liveops/actions/workflows/ci.yml)
 [![Demo](https://github.com/joaopalmeidao/celery-liveops/actions/workflows/demo.yml/badge.svg)](https://github.com/joaopalmeidao/celery-liveops/actions/workflows/demo.yml)
+[![PyPI](https://img.shields.io/pypi/v/celery-liveops)](https://pypi.org/project/celery-liveops/)
 [![Python](https://img.shields.io/pypi/pyversions/celery-liveops)](https://pypi.org/project/celery-liveops/)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
