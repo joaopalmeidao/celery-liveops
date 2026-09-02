@@ -8,6 +8,10 @@ name: Release
 on:
   push:
     tags: ["v*"]
+  # Manual escape hatch: a tag whose commit the runner skipped (a bot commit
+  # carrying the skip marker, say) never fires the push event, and the version
+  # number is already spent. This republishes the same ref without a new tag.
+  workflow_dispatch:
 
 jobs:
   build:
